@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { ArrowLeft, MapPin, Clock, MessageCircle, Heart } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useQuery } from "@tanstack/react-query";
-import { getInboxApi, InboxResponse, ApiError } from "@/lib/api";
+import { getInboxApi, InboxResponse, ApiError, Note as ApiNote } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
 
 /** helper to format time left */
@@ -28,27 +28,33 @@ const ReadNoteScreen: React.FC = () => {
   const { data, isPending, error, refetch } = useQuery<InboxResponse, ApiError>({
     queryKey: ["inbox"],
     queryFn: async () => {
-      if (!token) return { note: null };
+      if (!token) return { notes: [] };
       return await getInboxApi(token);
     },
     enabled: !!token,
     staleTime: 15 * 1000,
   });
 
-  // select the note only if it matches route id
-  const note = useMemo(() => {
-    if (!data?.note) return null;
-    const nid = (data.note).id ?? (data.note).id ?? null;
-    return nid === id ? data.note : null;
+  // select the note from the inbox array that matches the route id
+  const note = useMemo<ApiNote | null>(() => {
+    if (!id || !data?.notes) return null;
+    return data.notes.find((n) => String(n.id) === String(id)) ?? null;
   }, [data, id]);
 
   // live countdown text
   const [timeLeft, setTimeLeft] = useState<string>("");
   useEffect(() => {
-    if (!note) return;
+    if (!note) {
+      setTimeLeft("");
+      return;
+    }
     const update = () => {
-      const ms = new Date(note.expiresAt).getTime() - Date.now();
-      setTimeLeft(formatTimeLeft(ms));
+      try {
+        const ms = new Date(note.expiresAt).getTime() - Date.now();
+        setTimeLeft(formatTimeLeft(ms));
+      } catch {
+        setTimeLeft("");
+      }
     };
     update();
     const timer = setInterval(update, 60 * 1000);
@@ -56,7 +62,6 @@ const ReadNoteScreen: React.FC = () => {
   }, [note]);
 
   // ---------- Appreciation (frontend-only) ----------
-  // stored in sessionStorage so it persists while the tab is open
   const [appreciatedLocal, setAppreciatedLocal] = useState<boolean>(() => {
     if (!id) return false;
     try {
@@ -79,15 +84,10 @@ const ReadNoteScreen: React.FC = () => {
       description: "Thanks for spreading kindness!",
     });
 
-    // small visual "pulse" animation (optional CSS class). You can add more elaborate effects.
     const el = document.getElementById(`appreciate-btn-${note.id}`);
     if (el) {
       el.animate(
-        [
-          { transform: "scale(1)" },
-          { transform: "scale(1.08)" },
-          { transform: "scale(1)" }
-        ],
+        [{ transform: "scale(1)" }, { transform: "scale(1.08)" }, { transform: "scale(1)" }],
         { duration: 300, easing: "ease-out" }
       );
     }
@@ -97,6 +97,11 @@ const ReadNoteScreen: React.FC = () => {
   const handleReply = () => {
     if (!note) {
       toast({ title: "No note", description: "Note not available.", variant: "destructive" });
+      return;
+    }
+    // if sender copy (readOnly) cannot reply
+    if (note.role === "sent") {
+      toast({ title: "Read-only", description: "This is your sent copy and cannot be replied to." });
       return;
     }
     if (note.replied) {
@@ -122,6 +127,7 @@ const ReadNoteScreen: React.FC = () => {
       {/* Body */}
       <div className="flex-1 p-6">
         {isPending && <div className="text-center py-16 text-muted-foreground">Loading…</div>}
+
         {error && (
           <div className="text-center py-16 text-red-500">
             Failed to load note: {error.message}
@@ -149,7 +155,9 @@ const ReadNoteScreen: React.FC = () => {
               <div>
                 <div className="flex items-center space-x-2">
                   <MapPin className="w-4 h-4 text-primary" />
-                  <span className="font-medium text-foreground">Someone anonymous</span>
+                  <span className="font-medium text-foreground">
+                    {note.role === "sent" ? "Your sent copy" : "Someone anonymous"}
+                  </span>
                 </div>
                 <div className="flex items-center space-x-1 text-xs text-muted-foreground">
                   <Clock className="w-3 h-3" />
@@ -165,15 +173,19 @@ const ReadNoteScreen: React.FC = () => {
 
             {/* Actions */}
             <div className="space-y-4">
-              {!note.replied ? (
+              {note.role === "received" && !note.replied ? (
                 <Button onClick={handleReply} className="btn-gradient w-full py-4 text-lg font-medium">
                   <MessageCircle className="w-5 h-5 mr-2" />
                   Send One-Time Reply
                 </Button>
-              ) : (
+              ) : note.replied ? (
                 <div className="text-center py-4">
                   <div className="text-2xl mb-2">✅</div>
-                  <p className="text-muted-foreground">You've already replied to this note</p>
+                  <p className="text-muted-foreground">This note has been replied to</p>
+                </div>
+              ) : (
+                <div className="text-center py-4">
+                  <div className="text-sm text-muted-foreground">This is a read-only copy</div>
                 </div>
               )}
 

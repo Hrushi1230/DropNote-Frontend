@@ -1,6 +1,17 @@
 // src/lib/api.ts
 const API_URL = (import.meta.env.VITE_API_URL as string) || "http://localhost:5000";
 
+
+export type UserProfile = { id: string; email: string; createdAt: string };
+
+export async function getProfileApi(token: string): Promise<UserProfile> {
+  const res = await fetch(`${API_URL}/api/users/me`, {
+    method: "GET",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  return handleRes<UserProfile>(res);
+}
+
 /**
  * Generic API error shape
  */
@@ -11,7 +22,6 @@ async function parseBody(res: Response): Promise<unknown> {
   const contentType = res.headers.get("content-type") || "";
   const isJson = contentType.includes("application/json");
   if (isJson) {
-    // try to parse JSON, return null on failure
     return await res.json().catch(() => null);
   }
   return await res.text().catch(() => null);
@@ -21,12 +31,10 @@ async function parseBody(res: Response): Promise<unknown> {
 async function handleRes<T = unknown>(res: Response): Promise<T> {
   const body = await parseBody(res);
   if (!res.ok) {
-    // safely extract message if body is an object and has `message`
     let message = res.statusText || "API error";
     if (body && typeof body === "object" && "message" in (body as Record<string, unknown>)) {
       const m = (body as Record<string, unknown>).message;
-      if (typeof m === "string") message = m;
-      else message = String(m);
+      message = typeof m === "string" ? m : String(m);
     } else if (typeof body === "string") {
       message = body;
     }
@@ -38,7 +46,6 @@ async function handleRes<T = unknown>(res: Response): Promise<T> {
 
 /* ------------------ AUTH ------------------ */
 
-/** Response types */
 export type AuthUser = { id: string; email?: string };
 export type AuthResponse = { token: string; user: AuthUser };
 
@@ -62,19 +69,25 @@ export async function loginApi(email: string, password: string): Promise<AuthRes
 
 /* ------------------ NOTES ------------------ */
 
+/**
+ * Note returned by backend
+ * role = "sent" (sender’s copy) or "received" (receiver’s copy)
+ */
 export type Note = {
   id: string;
   content: string;
   createdAt: string;
   expiresAt: string;
   replied: boolean;
+  senderId?: string;
+  receiverId?: string;
+  role: "sent" | "received";
 };
 
 export type DropResponse = { message: string; noteId?: string };
-export type InboxResponse = { note: Note | null };
+export type InboxResponse = { notes: Note[] };
 export type ReplyResponse = { message: string };
 
-/** Drop a new note */
 export async function dropNoteApi(token: string, content: string): Promise<DropResponse> {
   const res = await fetch(`${API_URL}/api/notes/drop`, {
     method: "POST",
@@ -84,7 +97,6 @@ export async function dropNoteApi(token: string, content: string): Promise<DropR
   return handleRes<DropResponse>(res);
 }
 
-/** Get inbox (single note assigned to user) */
 export async function getInboxApi(token: string): Promise<InboxResponse> {
   const res = await fetch(`${API_URL}/api/notes/inbox`, {
     method: "GET",
@@ -93,7 +105,6 @@ export async function getInboxApi(token: string): Promise<InboxResponse> {
   return handleRes<InboxResponse>(res);
 }
 
-/** Reply to a note (POST /api/notes/:id/reply) */
 export async function replyApi(token: string, noteId: string, content: string): Promise<ReplyResponse> {
   const res = await fetch(`${API_URL}/api/notes/${noteId}/reply`, {
     method: "POST",
@@ -103,7 +114,6 @@ export async function replyApi(token: string, noteId: string, content: string): 
   return handleRes<ReplyResponse>(res);
 }
 
-/** alias for clarity / compatibility with earlier suggestions */
 export const sendReplyApi = replyApi;
 
 /* ------------------ GDPR / misc ------------------ */
@@ -118,13 +128,13 @@ export async function gdprDeleteApi(token: string): Promise<{ message: string }>
 
 /* ------------------ token helpers ------------------ */
 export function saveToken(token: string): void {
-  try { localStorage.setItem("dropnote_token", token); } catch { /* ignore storage errors */ }
+  try { localStorage.setItem("dropnote_token", token); } catch {return ;}
 }
 export function loadToken(): string | null {
   try { return localStorage.getItem("dropnote_token"); } catch { return null; }
 }
 export function clearToken(): void {
-  try { localStorage.removeItem("dropnote_token"); } catch { /* ignore storage errors */ }
+  try { localStorage.removeItem("dropnote_token"); } catch {return ;}
 }
 
 /* default export */
